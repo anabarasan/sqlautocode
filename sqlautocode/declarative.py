@@ -7,7 +7,8 @@ except ImportError:
     from StringIO import StringIO
 
 import sqlalchemy
-from sqlalchemy import MetaData
+from sqlalchemy import exc, and_
+from sqlalchemy import MetaData, ForeignKeyConstraint
 from sqlalchemy.ext.declarative import declarative_base
 try:
     from sqlalchemy.ext.declarative import _deferred_relationship
@@ -21,12 +22,16 @@ try:
     #SA 0.5 support
     from sqlalchemy.orm import RelationProperty
 except ImportError:
-    RelationProperty = None
+    #SA 0.7 support
+    try:
+        from sqlalchemy.orm.properties import RelationshipProperty, RelationProperty
+    except ImportError:
+        RelationProperty = None
 
 
 import config
 import constants
-from formatter import _repr_coltype_as
+from formatter import _repr_coltype_as, foreignkeyconstraint_repr
 
 log = logging.getLogger('saac.decl')
 log.setLevel(logging.DEBUG)
@@ -64,7 +69,7 @@ def column_repr(self):
 
     name = self.name
 
-    if not hasattr(config, 'options') and config.options.generictypes:
+    if not hasattr(config, 'options') and self.config.options.generictypes:
         coltype = repr(self.type)
     elif type(self.type).__module__ == 'sqlalchemy.types':
         coltype = repr(self.type)
@@ -106,6 +111,7 @@ class ModelFactory(object):
         self.used_table_names = []
         schema = getattr(self.config, 'schema', None)
         self._metadata = MetaData(bind=config.engine)
+        self._foreign_keys = {}
         kw = {}
         self.schemas = None
         if schema:
@@ -133,8 +139,8 @@ class ModelFactory(object):
 
     def __repr__(self):
         tables = self.get_many_to_many_tables()
+        tables.extend(self.get_tables_with_no_pks())
         models = self.models
-
 
         s = StringIO()
         engine = self.config.engine
@@ -147,6 +153,8 @@ class ModelFactory(object):
         self.used_table_names = []
         self.used_model_names = []
         for table in tables:
+            if table not in self.tables:
+                continue
             table_name = self.find_new_name(table.name, self.used_table_names)
             self.used_table_names.append(table_name)
             s.write('%s = %s\n\n'%(table_name, self._table_repr(table)))
@@ -163,16 +171,36 @@ class ModelFactory(object):
 
     @property
     def tables(self):
-        return self._metadata.tables.keys()
+        if self.config.options.tables:
+            tables = set(self.config.options.tables)
+            return [self._metadata.tables[t] for t in set(self._metadata.tables.keys()).intersection(tables)]
+        return self._metadata.tables.values()
 
+    @property
+    def table_names(self):
+        return [t.name for t in self.tables]
+    
     @property
     def models(self):
         if hasattr(self, '_models'):
             return self._models
         self.used_model_names = []
         self.used_table_names = []
-        self._models = sorted((self.create_model(table) for table in self.get_non_many_to_many_tables()), by__name__)
+        self._models = []
+        for table in self.get_non_many_to_many_tables():
+            try:
+                self._models.append(self.create_model(table))
+            except exc.ArgumentError:
+                log.warning("Table with name %s ha no primary key. No ORM class created"%table.name)
+        self._models.sort(by__name__)
         return self._models
+    
+    def get_tables_with_no_pks(self):
+        r = []
+        for table in self.get_non_many_to_many_tables():
+            if not [c for c in table.columns if c.primary_key]:
+                r.append(table)
+        return r
     
     def model_table_lookup(self):
         if hasattr(self, '_model_table_lookup'):
@@ -202,6 +230,7 @@ class ModelFactory(object):
 
         mtl = self.model_table_lookup
 
+            
         class Temporal(self.DeclarativeBase):
             __table__ = table
             
@@ -215,21 +244,23 @@ class ModelFactory(object):
                 target = target.__name__
                 primaryjoin=''
                 lookup = mtl()
-                if rel.primaryjoin is not None:
-                    right_lookup = lookup.get(rel.primaryjoin.right.table.name, '%s.c.'%rel.primaryjoin.right.table.name)
-                    left_lookup = lookup.get(rel.primaryjoin.left.table.name, '%s.c.'%rel.primaryjoin.left.table.name)
+                if rel.primaryjoin is not None and hasattr(rel.primaryjoin, 'right'):
+                    right_lookup = lookup.get(rel.primaryjoin.right.table.name, '%s.c'%rel.primaryjoin.right.table.name)
+                    left_lookup = lookup.get(rel.primaryjoin.left.table.name, '%s.c'%rel.primaryjoin.left.table.name)
                     
                     primaryjoin = ", primaryjoin='%s.%s==%s.%s'"%(left_lookup,
                                                                   rel.primaryjoin.left.name,
                                                                   right_lookup,
                                                                   rel.primaryjoin.right.name)
+                elif hasattr(rel, '_as_string'):
+                    primaryjoin=', primaryjoin="%s"'%rel._as_string
+                    
                 secondary = ''
                 secondaryjoin = ''
                 if rel.secondary is not None:
                     secondary = ", secondary=%s"%rel.secondary.name
-                    right_lookup = lookup.get(rel.secondaryjoin.right.table.name, '%s.c.'%rel.secondaryjoin.right.table.name)
-                    left_lookup = lookup.get(rel.secondaryjoin.left.table.name, '%s.c.'%rel.secondaryjoin.left.table.name)
-#                    import ipdb; ipdb.set_trace()
+                    right_lookup = lookup.get(rel.secondaryjoin.right.table.name, '%s.c'%rel.secondaryjoin.right.table.name)
+                    left_lookup = lookup.get(rel.secondaryjoin.left.table.name, '%s.c'%rel.secondaryjoin.left.table.name)
                     secondaryjoin = ", secondaryjoin='%s.%s==%s.%s'"%(left_lookup,
                                                                   rel.secondaryjoin.left.name,
                                                                   right_lookup,
@@ -238,12 +269,16 @@ class ModelFactory(object):
 #                if rel.backref:
 #                    backref=", backref='%s'"%rel.backref.key
                 return "%s = relation('%s'%s%s%s%s)"%(rel.key, target, primaryjoin, secondary, secondaryjoin, backref)
-
+                
             @classmethod
             def __repr__(cls):
                 log.debug('repring class with name %s'%cls.__name__)
                 try:
-                    mapper = class_mapper(cls)
+                    mapper = None
+                    try:
+                        mapper = class_mapper(cls)
+                    except exc.InvalidRequestError:
+                        log.warn("A proper mapper could not be generated for the class %s, no relations will be created"%model_name)
                     s = ""
                     s += "class "+model_name+'(DeclarativeBase):\n'
                     if is_many_to_many_table:
@@ -251,6 +286,10 @@ class ModelFactory(object):
                     else:
                         s += "    __tablename__ = '%s'\n\n"%table_name
                         if hasattr(cls, '__table_args__'):
+                            #if cls.__table_args__[0]:
+                                #for fkc in cls.__table_args__[0]:
+                                #    fkc.__class__.__repr__ = foreignkeyconstraint_repr
+                                #    break
                             s+="    __table_args__ = %s\n\n"%cls.__table_args__
                         s += "    #column definitions\n"
                         for column in sorted(cls.__table__.c, by_name):
@@ -258,11 +297,12 @@ class ModelFactory(object):
                     s += "\n    #relation definitions\n"
                     ess = s
                     # this is only required in SA 0.5
-                    if RelationProperty: 
+                    if mapper and RelationProperty: 
                         for prop in mapper.iterate_properties:
                             if isinstance(prop, RelationshipProperty):
                                 s+='    %s\n'%cls._relation_repr(prop)
                     return s
+                    
                 except Exception, e:
                     log.error("Could not generate class for: %s"%cls.__name__)
                     from traceback import format_exc
@@ -272,51 +312,75 @@ class ModelFactory(object):
 
         #hack the class to have the right classname
         Temporal.__name__ = model_name
-
+        
+        #set up some blank table args
+        Temporal.__table_args__ = {} 
+        
         #add in the schema
         if self.config.schema:
-            Temporal.__table_args__ = {'schema':table.schema}
+            Temporal.__table_args__[1]['schema'] = table.schema
 
         #trick sa's model registry to think the model is the correct name
         if model_name != 'Temporal':
             Temporal._decl_class_registry[model_name] = Temporal._decl_class_registry['Temporal']
             del Temporal._decl_class_registry['Temporal']
 
-        
         #add in single relations
-        fks = self.get_foreign_keys(table)
-        for related_table in sorted(fks.keys(), by_name):
-            columns = fks[related_table]
-            if len(columns)>1:
+        fks = self.get_single_foreign_keys_by_column(table)
+        for column, fk in fks.iteritems():
+            related_table = fk.column.table
+            if related_table not in self.tables:
                 continue
-            column = columns[0]
+
             log.info('    Adding <primary> foreign key for:%s'%related_table.name)
             backref_name = plural(table_name)
-#            import ipdb; ipdb.set_trace()
             rel = relation(singular(name2label(related_table.name, related_table.schema)), 
-                           primaryjoin=column==column.foreign_keys[0].column)#, backref=backref_name)
+                           primaryjoin=column==fk.column)#, backref=backref_name)
+        
             setattr(Temporal, related_table.name, _deferred_relationship(Temporal, rel))
         
+        #add in the relations for the composites
+        for constraint in table.constraints:
+            if isinstance(constraint, ForeignKeyConstraint):
+                if len(constraint.elements) >1:
+                    related_table = constraint.elements[0].column.table
+                    related_classname = singular(name2label(related_table.name, related_table.schema))
+                                    
+                    primary_join = "and_(%s)"%', '.join(["%s.%s==%s.%s"%(model_name,
+                                                                        k.parent.name,
+                                                                        related_classname,
+                                                                        k.column.name)
+                                                      for k in constraint.elements])
+                    rel = relation(related_classname,
+                                   primaryjoin=primary_join
+#                                   foreign_keys=[k.parent for k in constraint.elements]
+                               )
+                    
+                    rel._as_string = primary_join
+                    setattr(Temporal, related_table.name, rel) # _deferred_relationship(Temporal, rel))
+                
         
         #add in many-to-many relations
         for join_table in self.get_related_many_to_many_tables(table.name):
 
-            primary_column = [c for c in join_table.columns if c.foreign_keys and c.foreign_keys[0].column.table==table][0]
-#            import ipdb; ipdb.set_trace();
+            if join_table not in self.tables:
+                continue
+            primary_column = [c for c in join_table.columns if c.foreign_keys and list(c.foreign_keys)[0].column.table==table][0]
             
             for column in join_table.columns:
                 if column.foreign_keys:
-                    key = column.foreign_keys[0]
+                    key = list(column.foreign_keys)[0]
                     if key.column.table is not table:
-                        related_column = related_table = column.foreign_keys[0].column
+                        related_column = related_table = list(column.foreign_keys)[0].column
                         related_table = related_column.table
+                        if related_table not in self.tables:
+                            continue
                         log.info('    Adding <secondary> foreign key(%s) for:%s'%(key, related_table.name))
-#                        import ipdb; ipdb.set_trace()
                         setattr(Temporal, plural(related_table.name), _deferred_relationship(Temporal,
                                                                                          relation(singular(name2label(related_table.name,
                                                                                                              related_table.schema)),
                                                                                                   secondary=join_table,
-                                                                                                  primaryjoin=primary_column.foreign_keys[0].column==primary_column,
+                                                                                                  primaryjoin=list(primary_column.foreign_keys)[0].column==primary_column,
                                                                                                   secondaryjoin=column==related_column
                                                                                                   )))
                         break;
@@ -336,22 +400,50 @@ class ModelFactory(object):
                     return table
         return self._metadata.tables[name]
 
+    def get_single_foreign_keys_by_column(self, table):
+        keys_by_column = {}
+        fks = self.get_foreign_keys(table)
+        for table, keys in fks.iteritems():
+            if len(keys) == 1:
+                fk = keys[0]
+                keys_by_column[fk.parent] = fk
+        return keys_by_column
+
+    def get_composite_foreign_keys(self, table):
+        l = []
+        fks = self.get_foreign_keys(table)
+        for table, keys in fks.iteritems():
+            if len(keys)>1:
+                l.append(keys)
+        return l
+        
+        
     def get_foreign_keys(self, table):
-        fks = {}
-        for column in table.columns:
-            if len(column.foreign_keys)>0:
-                fks.setdefault(column.foreign_keys[0].column.table, []).append(column)
-        return fks
+        if table in self._foreign_keys:
+            return self._foreign_keys[table]
+        
+        fks = table.foreign_keys
+
+        #group fks by table.  I think this is needed because of a problem in the sa reflection alg.
+        grouped_fks = {}
+        for key in fks:
+            grouped_fks.setdefault(key.column.table, []).append(key)
+        
+        self._foreign_keys[table] = grouped_fks
+        return grouped_fks
+    
+#        fks = {}
+#        for column in table.columns:
+#            if len(column.foreign_keys)>0:
+#                fks.setdefault(column.name, []).extend(column.foreign_keys)
+#        return fks
 
     def is_many_to_many_table(self, table):
-        fks = self.get_foreign_keys(table).values()
-        if len(fks) >= 2:
-            if len(fks[0]) == 1 and len(fks[1]) == 1:
-                return fks[0][0].foreign_keys[0].column.table != fks[1][0].foreign_keys[0].column.table
-        return False
+        fks = self.get_single_foreign_keys_by_column(table).values()
+        return len(fks) >= 2
 
     def is_only_many_to_many_table(self, table):
-        return len(self.get_foreign_keys(table)) == 2 and len(table.c) == 2
+        return len(self.get_single_foreign_keys_by_column(table)) == 2 and len(table.c) == 2
 
     def get_many_to_many_tables(self):
         if not hasattr(self, '_many_to_many_tables'):
@@ -359,7 +451,7 @@ class ModelFactory(object):
         return sorted(self._many_to_many_tables, by_name)
 
     def get_non_many_to_many_tables(self):
-        tables = [table for table in self._metadata.tables.values() if not(self.is_only_many_to_many_table(table))]
+        tables = [table for table in self.tables if not(self.is_only_many_to_many_table(table))]
         return sorted(tables, by_name)
 
     def get_related_many_to_many_tables(self, table_name):
@@ -368,7 +460,7 @@ class ModelFactory(object):
         for table in self.get_many_to_many_tables():
             for column in table.columns:
                 if column.foreign_keys:
-                    key = column.foreign_keys[0]
+                    key = list(column.foreign_keys)[0]
                     if key.column.table is src_table:
                         tables.append(table)
                         break

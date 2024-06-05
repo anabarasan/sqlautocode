@@ -1,11 +1,16 @@
 import os
+import pprint as pp
 from nose.tools import eq_
 from sqlautocode.declarative import ModelFactory
 from sqlalchemy.orm import class_mapper
 testdb = 'sqlite:///'+os.path.abspath(os.path.dirname(__file__))+'/data/devdata.db'
 #testdb = 'postgres://postgres@localhost/TestSamples'
 
-from base import make_test_db
+from base import make_test_db, make_test_db_multi
+
+class DummyOptions:
+    
+    tables = None
 
 class DummyConfig:
 
@@ -16,17 +21,19 @@ class DummyConfig:
     example = True
     schema = None
     interactive = None
+    
+    options=DummyOptions()
 #    schema = ['pdil_samples', 'pdil_tools']
 
 
-class TestModelFactory:
+class _TestModelFactory:
 
     def setup(self):
         self.config = DummyConfig()
         self.factory = ModelFactory(self.config)
 
     def test_tables(self):
-        tables = sorted(self.factory.tables)
+        tables = sorted([t.name for t in self.factory.tables])
         eq_(tables,  [u'tg_group', u'tg_group_permission', u'tg_permission', u'tg_town', u'tg_user', u'tg_user_group'])
 
     def _setup_all_models(self):
@@ -57,9 +64,8 @@ class TestModelFactory:
         eq_(tables, [u'tg_user_group'])
 
     def test_get_foreign_keys(self):
-        columns = [column[0].name for column in self.factory.get_foreign_keys(self.factory._metadata.tables['tg_user']).values()]
+        columns = [c[0].column.name for c in self.factory.get_foreign_keys(self.factory._metadata.tables['tg_user']).values()]
         eq_(columns, ['town_id'])
-
 
     def test_model___repr__(self):
         models = sorted(self._setup_all_models())
@@ -74,16 +80,16 @@ class TgUser(DeclarativeBase):
 
     #column definitions
     created = Column(u'created', TIMESTAMP(timezone=False))
-    display_name = Column(u'display_name', VARCHAR(length=255, convert_unicode=False, assert_unicode=None))
-    email_address = Column(u'email_address', VARCHAR(length=255, convert_unicode=False, assert_unicode=None), nullable=False)
-    password = Column(u'password', VARCHAR(length=80, convert_unicode=False, assert_unicode=None))
+    display_name = Column(u'display_name', VARCHAR(length=255, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False))
+    email_address = Column(u'email_address', VARCHAR(length=255, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False), nullable=False)
+    password = Column(u'password', VARCHAR(length=80, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False))
     town_id = Column(u'town_id', INTEGER(), ForeignKey('tg_town.town_id'))
     user_id = Column(u'user_id', INTEGER(), primary_key=True, nullable=False)
-    user_name = Column(u'user_name', VARCHAR(length=16, convert_unicode=False, assert_unicode=None), nullable=False)
+    user_name = Column(u'user_name', VARCHAR(length=16, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False), nullable=False)
 
     #relation definitions
-    tg_town = relation('TgTown')
-    tg_groups = relation('TgGroup', secondary=tg_user_group)
+    tg_town = relation('TgTown', primaryjoin='TgUser.town_id==TgTown.town_id')
+    tg_groups = relation('TgGroup', primaryjoin='TgUser.user_id==tg_user_group.c.user_id', secondary=tg_user_group, secondaryjoin='tg_user_group.c.group_id==TgGroup.group_id')
 """
         eq_(r.strip(), expected.strip())
 
@@ -98,7 +104,7 @@ from sqlalchemy import *
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relation
 
-engine = create_engine('sqlite:////Users/percious/oss/tgtut/src/sqlautocode/sqlautocode/tests/data/devdata.db')
+engine = create_engine('sqlite:////Users/percious/oss/tgdev-py27/src/sqlautocode/sqlautocode/tests/data/devdata.db')
 DeclarativeBase = declarative_base()
 metadata = DeclarativeBase.metadata
 metadata.bind = engine
@@ -118,25 +124,25 @@ class TgGroup(DeclarativeBase):
 
     #column definitions
     created = Column(u'created', TIMESTAMP(timezone=False))
-    display_name = Column(u'display_name', VARCHAR(length=255, convert_unicode=False, assert_unicode=None))
+    display_name = Column(u'display_name', VARCHAR(length=255, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False))
     group_id = Column(u'group_id', INTEGER(), primary_key=True, nullable=False)
-    group_name = Column(u'group_name', VARCHAR(length=16, convert_unicode=False, assert_unicode=None), nullable=False)
+    group_name = Column(u'group_name', VARCHAR(length=16, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False), nullable=False)
 
     #relation definitions
-    tg_permissions = relation('TgPermission', secondary=tg_group_permission)
-    tg_users = relation('TgUser', secondary=tg_user_group)
+    tg_permissions = relation('TgPermission', primaryjoin='TgGroup.group_id==tg_group_permission.c.group_id', secondary=tg_group_permission, secondaryjoin='tg_group_permission.c.permission_id==TgPermission.permission_id')
+    tg_users = relation('TgUser', primaryjoin='TgGroup.group_id==tg_user_group.c.group_id', secondary=tg_user_group, secondaryjoin='tg_user_group.c.user_id==TgUser.user_id')
 
 
 class TgPermission(DeclarativeBase):
     __tablename__ = 'tg_permission'
 
     #column definitions
-    description = Column(u'description', VARCHAR(length=255, convert_unicode=False, assert_unicode=None))
+    description = Column(u'description', VARCHAR(length=255, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False))
     permission_id = Column(u'permission_id', INTEGER(), primary_key=True, nullable=False)
-    permission_name = Column(u'permission_name', VARCHAR(length=16, convert_unicode=False, assert_unicode=None), nullable=False)
+    permission_name = Column(u'permission_name', VARCHAR(length=16, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False), nullable=False)
 
     #relation definitions
-    tg_groups = relation('TgGroup', secondary=tg_group_permission)
+    tg_groups = relation('TgGroup', primaryjoin='TgPermission.permission_id==tg_group_permission.c.permission_id', secondary=tg_group_permission, secondaryjoin='tg_group_permission.c.group_id==TgGroup.group_id')
 
 
 class TgTown(DeclarativeBase):
@@ -144,7 +150,7 @@ class TgTown(DeclarativeBase):
 
     #column definitions
     town_id = Column(u'town_id', INTEGER(), primary_key=True, nullable=False)
-    town_name = Column(u'town_name', VARCHAR(length=255, convert_unicode=False, assert_unicode=None))
+    town_name = Column(u'town_name', VARCHAR(length=255, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False))
 
     #relation definitions
 
@@ -154,24 +160,23 @@ class TgUser(DeclarativeBase):
 
     #column definitions
     created = Column(u'created', TIMESTAMP(timezone=False))
-    display_name = Column(u'display_name', VARCHAR(length=255, convert_unicode=False, assert_unicode=None))
-    email_address = Column(u'email_address', VARCHAR(length=255, convert_unicode=False, assert_unicode=None), nullable=False)
-    password = Column(u'password', VARCHAR(length=80, convert_unicode=False, assert_unicode=None))
+    display_name = Column(u'display_name', VARCHAR(length=255, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False))
+    email_address = Column(u'email_address', VARCHAR(length=255, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False), nullable=False)
+    password = Column(u'password', VARCHAR(length=80, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False))
     town_id = Column(u'town_id', INTEGER(), ForeignKey('tg_town.town_id'))
     user_id = Column(u'user_id', INTEGER(), primary_key=True, nullable=False)
-    user_name = Column(u'user_name', VARCHAR(length=16, convert_unicode=False, assert_unicode=None), nullable=False)
+    user_name = Column(u'user_name', VARCHAR(length=16, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False), nullable=False)
 
     #relation definitions
-    tg_town = relation('TgTown')
-    tg_groups = relation('TgGroup', secondary=tg_user_group)
+    tg_town = relation('TgTown', primaryjoin='TgUser.town_id==TgTown.town_id')
+    tg_groups = relation('TgGroup', primaryjoin='TgUser.user_id==tg_user_group.c.user_id', secondary=tg_user_group, secondaryjoin='tg_user_group.c.group_id==TgGroup.group_id')
 
 
 #example on how to query your Schema
 from sqlalchemy.orm import sessionmaker
 session = sessionmaker(bind=engine)()
 objs = session.query(TgGroup).all()
-print 'All TgGroup objects: %s'%objs
-"""
+print 'All TgGroup objects: %s'%objs"""
         assert expected in r, r
 
 
@@ -185,8 +190,8 @@ class TestModelFactoryNew:
         self.factory.models
 
     def test_tables(self):
-        tables = sorted(self.factory.tables)
-        eq_(tables,  [u'environment', u'report', u'ui_report'])
+        tables = sorted([t.name for t in self.factory.tables])
+        eq_(tables,  [u'environment', u'no_pk', u'report', u'ui_report'])
 
     def test_setup_all_models(self):
         assert len(self.factory.models) == 3
@@ -194,27 +199,37 @@ class TestModelFactoryNew:
     def test_repr_environ_model(self):
         print self.factory.models
         s = self.factory.models[0].__repr__()
-        assert s == """\
-class Environment(DeclarativeBase):
+        assert s == """class Environment(DeclarativeBase):
     __tablename__ = 'environment'
 
+    __table_args__ = {}
+
     #column definitions
-    database_host = Column(u'database_host', VARCHAR(length=100, convert_unicode=False, assert_unicode=None), nullable=False)
-    database_pass = Column(u'database_pass', VARCHAR(length=100, convert_unicode=False, assert_unicode=None), nullable=False)
-    database_port = Column(u'database_port', VARCHAR(length=5, convert_unicode=False, assert_unicode=None), nullable=False)
-    database_sid = Column(u'database_sid', VARCHAR(length=32, convert_unicode=False, assert_unicode=None), nullable=False)
-    database_user = Column(u'database_user', VARCHAR(length=100, convert_unicode=False, assert_unicode=None), nullable=False)
+    database_host = Column(u'database_host', VARCHAR(length=100, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False), nullable=False)
+    database_pass = Column(u'database_pass', VARCHAR(length=100, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False), nullable=False)
+    database_port = Column(u'database_port', VARCHAR(length=5, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False), nullable=False)
+    database_sid = Column(u'database_sid', VARCHAR(length=32, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False), nullable=False)
+    database_user = Column(u'database_user', VARCHAR(length=100, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False), nullable=False)
     environment_id = Column(u'environment_id', NUMERIC(precision=10, scale=0, asdecimal=True), primary_key=True, nullable=False)
-    environment_name = Column(u'environment_name', VARCHAR(length=100, convert_unicode=False, assert_unicode=None), nullable=False)
+    environment_name = Column(u'environment_name', VARCHAR(length=100, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False), nullable=False)
 
     #relation definitions
-    reports = relation('Report', secondary=ui_report)
+    reports = relation('Report', primaryjoin='Environment.environment_id==UiReport.environment_id', secondary=ui_report, secondaryjoin='UiReport.report_id==Report.report_id')
 """, s
 
+    def test_no_pk_table_in_output(self):
+        s = self.factory.__repr__()
+        assert """no_pk = Table(u'no_pk', metadata,
+    Column(u'data', TEXT(length=None, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False)),
+)""" in s, s
+        
+        
     def test_repr_report(self):
         s = self.factory.models[1].__repr__()
         assert s == """class Report(DeclarativeBase):
     __tablename__ = 'report'
+
+    __table_args__ = {}
 
     #column definitions
     created_by = Column(u'created_by', NUMERIC(precision=10, scale=0, asdecimal=True), nullable=False)
@@ -223,13 +238,55 @@ class Environment(DeclarativeBase):
     deleted_by = Column(u'deleted_by', NUMERIC(precision=10, scale=0, asdecimal=True))
     deleted_date = Column(u'deleted_date', DATETIME(timezone=False))
     environment_id = Column(u'environment_id', NUMERIC(precision=10, scale=0, asdecimal=True), ForeignKey('environment.environment_id'), nullable=False)
-    report_description = Column(u'report_description', VARCHAR(length=4000, convert_unicode=False, assert_unicode=None))
+    report_description = Column(u'report_description', VARCHAR(length=4000, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False))
     report_id = Column(u'report_id', NUMERIC(precision=10, scale=0, asdecimal=True), primary_key=True, nullable=False)
-    report_name = Column(u'report_name', VARCHAR(length=50, convert_unicode=False, assert_unicode=None), nullable=False)
+    report_name = Column(u'report_name', VARCHAR(length=50, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False), nullable=False)
     updated_by = Column(u'updated_by', NUMERIC(precision=10, scale=0, asdecimal=True), nullable=False)
     updated_date = Column(u'updated_date', DATETIME(timezone=False), nullable=False)
 
     #relation definitions
-    environment = relation('Environment')
-    environments = relation('Environment', secondary=ui_report)
+    environment = relation('Environment', primaryjoin='Report.environment_id==Environment.environment_id')
+    environments = relation('Environment', primaryjoin='Report.report_id==UiReport.report_id', secondary=ui_report, secondaryjoin='UiReport.environment_id==Environment.environment_id')
 """, s
+
+        
+class TestModelFactoryMulti:
+
+    def __init__(self, *args, **kw):
+        
+        self.metadata = make_test_db_multi()
+        engine = self.metadata.bind
+        self.config = DummyConfig(engine)
+        self.factory = ModelFactory(self.config)
+#        self.factory.models
+        
+    
+    def test_get_foreign_keys(self):
+        fks = [t.name for t in self.factory.get_foreign_keys(self.metadata.tables['song']).keys()]
+        
+        eq_(fks, ['album'])
+        
+    def test_get_composite_fks(self):
+        fks = sorted([k.column.name for k in self.factory.get_composite_foreign_keys(self.metadata.tables['song'])[0]])
+        eq_(fks, [u'albumartist', u'albumname'] )
+ 
+    def test_render_song(self):
+        self.factory.models
+        song = self.factory.models[1]
+        eq_(song.__repr__(), """class Song(DeclarativeBase):
+    __tablename__ = 'song'
+
+    __table_args__ = {}
+
+    #column definitions
+    songalbum = Column(u'songalbum', TEXT(length=None, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False), ForeignKey('album.albumname'))
+    songartist = Column(u'songartist', TEXT(length=None, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False), ForeignKey('album.albumartist'))
+    songid = Column(u'songid', INTEGER(), primary_key=True)
+    songname = Column(u'songname', TEXT(length=None, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False))
+
+    #relation definitions
+    album = relation('Album', primaryjoin="and_(Song.songartist==Album.albumartist, Song.songalbum==Album.albumname)")
+"""
+    )
+        
+ 

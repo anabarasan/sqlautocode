@@ -77,9 +77,9 @@ def column_repr(self):
             }
 
     if data['constraints']:
-        if data['constraints']: data['constraints'] = ', ' + data['constraints']
+        data['constraints'] = ', ' + data['constraints']
     if data['args']:
-        if data['args']: data['args'] = ', ' + data['args']
+        data['args'] = ', ' + data['args']
 
     return util.as_out_str(constants.COLUMN % data)
 

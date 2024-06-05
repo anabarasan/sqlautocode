@@ -58,15 +58,34 @@ def make_test_db():
     global bound, metadata
     if not bound:
         testdb_filename = os.path.abspath(os.path.dirname(__file__))+'/data/testdb.db'
-        try:
-            os.remove(testdb_filename)
-        except OSError:
-            pass
+        #try:
+        #    os.remove(testdb_filename)
+        #except OSError:
+        #    pass
         
         db = 'sqlite:///'+testdb_filename
         
         test_engine = create_engine(db)
         metadata.bind =test_engine
-        metadata.create_all()
+        #metadata.create_all()
         bound = True
     return metadata
+
+bound_multi = False
+metadata_multi = MetaData()
+def make_test_db_multi():
+    global bound_multi, metadata_multi
+    if not bound_multi:
+        testdb_filename = os.path.abspath(os.path.dirname(__file__))+'/data/multi.db'
+        #testdb_filename = os.path.abspath(os.path.dirname(__file__))+'/data/devdata.db'
+        
+        db = 'sqlite:///'+testdb_filename
+        
+        test_engine = create_engine(db)
+        metadata_multi.bind =test_engine
+        metadata_multi.reflect()
+        bound_multi = True
+    return metadata_multi
+
+
+    

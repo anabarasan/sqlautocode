@@ -28,21 +28,23 @@ def main():
     formatter.monkey_patch_sa()
     
     import sqlalchemy
+    from sqlalchemy.engine.reflection import Inspector
     db, options = config.engine, config.options
     metadata = sqlalchemy.MetaData(db)
 
     print >>config.err, 'Starting...'
     conn = db.connect()
+    inspector = Inspector.from_engine(conn)
 
     if options.schema != None:
         reflection_schema=options.schema
     else:
         try:
-            reflection_schema = db.dialect._get_default_schema_name(conn)
+            reflection_schema = inspector.default_schema_name
         except NotImplementedError:
             reflection_schema = None
 
-    tablenames = db.dialect.get_table_names(conn, reflection_schema)
+    tablenames = inspector.get_table_names(reflection_schema)
 
     # fixme: don't set up output until we're sure there's work to do!
     if options.tables:
@@ -81,8 +83,8 @@ def main():
             #  this one.
             original_schema = table.schema
             table.schema = None
-
-        else: original_schema = options.schema
+        else:
+            original_schema = options.schema
 
         INC = '\n\n'
         if options.z3c:
