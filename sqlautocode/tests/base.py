@@ -12,8 +12,8 @@ environment =  Table('environment', metadata,
             Column(u'database_sid', String(length=32, convert_unicode=False, assert_unicode=None), primary_key=False, nullable=False),
             Column(u'database_user', String(length=100, convert_unicode=False, assert_unicode=None), primary_key=False, nullable=False),
             Column(u'database_pass', String(length=100, convert_unicode=False, assert_unicode=None), primary_key=False, nullable=False),
-    
-    
+
+
     )
 
 
@@ -30,7 +30,7 @@ report =  Table('report', metadata,
             Column(u'deleted_date', DateTime(timezone=False), primary_key=False),
             Column(u'deleted_by', Numeric(precision=10, scale=0, asdecimal=True), primary_key=False),
             ForeignKeyConstraint([u'environment_id'], [u'environment.environment_id'], name='REPORT_FK_ENV_ID'),
-    
+
     )
 
 
@@ -50,7 +50,11 @@ ui_report =  Table('ui_report', metadata,
             Column(u'deleted_by', Numeric(precision=10, scale=0, asdecimal=True), primary_key=False),
             ForeignKeyConstraint([u'report_id'], [u'report.report_id'], name='UI_REPORT_FK_REPORT_ID'),
             ForeignKeyConstraint([u'environment_id'], [u'environment.environment_id'], name='UI_REPORT_FK_ENV_ID'),
-    
+
+    )
+
+no_pk = Table('no_pk', metadata,
+    Column(u'data', TEXT(length=None, convert_unicode=False, assert_unicode=None, unicode_error=None, _warn_on_bytestring=False))
     )
 
 bound = False
@@ -58,16 +62,16 @@ def make_test_db():
     global bound, metadata
     if not bound:
         testdb_filename = os.path.abspath(os.path.dirname(__file__))+'/data/testdb.db'
-        #try:
-        #    os.remove(testdb_filename)
-        #except OSError:
-        #    pass
-        
+        try:
+           os.remove(testdb_filename)
+        except OSError:
+           pass
+
         db = 'sqlite:///'+testdb_filename
-        
+
         test_engine = create_engine(db)
         metadata.bind =test_engine
-        #metadata.create_all()
+        metadata.create_all()
         bound = True
     return metadata
 
@@ -78,9 +82,9 @@ def make_test_db_multi():
     if not bound_multi:
         testdb_filename = os.path.abspath(os.path.dirname(__file__))+'/data/multi.db'
         #testdb_filename = os.path.abspath(os.path.dirname(__file__))+'/data/devdata.db'
-        
+
         db = 'sqlite:///'+testdb_filename
-        
+
         test_engine = create_engine(db)
         metadata_multi.bind =test_engine
         metadata_multi.reflect()
@@ -88,4 +92,3 @@ def make_test_db_multi():
     return metadata_multi
 
 
-    

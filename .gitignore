@@ -1,0 +1,3 @@
+*.egg-info/
+sqlautocode/tests/data/multi.db
+sqlautocode/tests/data/testdb.db
